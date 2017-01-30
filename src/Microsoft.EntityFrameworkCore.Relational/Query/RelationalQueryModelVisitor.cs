@@ -985,6 +985,7 @@ namespace Microsoft.EntityFrameworkCore.Query
             private readonly RelationalQueryCompilationContext _relationalQueryCompilationContext;
             private readonly ILinqOperatorProvider _linqOperatorProvider;
             private readonly SelectExpression _selectExpression;
+            private bool _insideShapedQueryMethod;
 
             public QuerySourceUpdater(
                 IQuerySource querySource,
@@ -1011,8 +1012,9 @@ namespace Microsoft.EntityFrameworkCore.Query
                         queryAnnotation.QuerySource = _querySource;
                     }
 
-                    if (!_relationalQueryCompilationContext.QuerySourceRequiresMaterialization(_querySource)
-                        && shaper is EntityShaper)
+                    if (_insideShapedQueryMethod
+                        && shaper is EntityShaper
+                        && !_relationalQueryCompilationContext.QuerySourceRequiresMaterialization(_querySource))
                     {
                         return Expression.Constant(new ValueBufferShaper(_querySource));
                     }
@@ -1027,12 +1029,14 @@ namespace Microsoft.EntityFrameworkCore.Query
 
             protected override Expression VisitMethodCall(MethodCallExpression methodCallExpression)
             {
+                _insideShapedQueryMethod = methodCallExpression.Method.MethodIsClosedFormOf(
+                    _relationalQueryCompilationContext.QueryMethodProvider.ShapedQueryMethod);
+
                 var arguments = VisitAndConvert(methodCallExpression.Arguments, "VisitMethodCall");
 
                 if (arguments != methodCallExpression.Arguments)
                 {
-                    if (methodCallExpression.Method.MethodIsClosedFormOf(
-                        _relationalQueryCompilationContext.QueryMethodProvider.ShapedQueryMethod))
+                    if (_insideShapedQueryMethod)
                     {
                         return Expression.Call(
                             _relationalQueryCompilationContext.QueryMethodProvider.ShapedQueryMethod
